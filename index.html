@@ -1,0 +1,898 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>City Love Potions For Colored People</title>
+
+<style>
+*{box-sizing:border-box}
+body{
+ margin:0;background:#101323;color:white;
+ font-family:Arial,sans-serif;overflow:hidden
+}
+#game{
+ display:block;width:100%;height:100vh;
+ background:#202c36;cursor:crosshair
+}
+#hud{
+ position:fixed;top:10px;left:10px;right:10px;
+ display:flex;flex-wrap:wrap;gap:8px;
+ z-index:5;pointer-events:none
+}
+.panel{
+ background:#101323eF;border:1px solid #65718d;
+ padding:9px 13px;border-radius:10px;
+ font-size:13px
+}
+#healthOuter{
+ width:110px;height:12px;background:#555;
+ border-radius:10px;display:inline-block;
+ overflow:hidden;vertical-align:middle
+}
+#health{height:100%;width:100%;background:#35e879}
+#inventory{
+ position:fixed;bottom:12px;left:10px;
+ z-index:5;display:flex;gap:7px;flex-wrap:wrap;
+ max-width:75%
+}
+.potion{
+ padding:9px;background:#151b30;
+ border:1px solid #8290a8;border-radius:9px;
+ font-size:12px
+}
+#help{
+ position:fixed;bottom:12px;right:10px;
+ background:#101323ed;padding:12px;
+ border-radius:10px;font-size:12px;
+ z-index:5;max-width:230px;line-height:1.7
+}
+#menu{
+ position:fixed;inset:0;background:#080d20eF;
+ display:flex;align-items:center;justify-content:center;
+ z-index:20;padding:15px
+}
+.dialog{
+ background:#202b45;border:2px solid #8e9fc7;
+ padding:25px;border-radius:18px;
+ width:min(490px,95vw);text-align:center;
+ box-shadow:0 0 35px #000
+}
+h1{color:#ff79bd;font-size:clamp(23px,5vw,38px)}
+h2{color:#ffd36b}
+button{
+ border:0;border-radius:9px;padding:12px 18px;
+ margin:5px;background:#f052a1;color:white;
+ font-weight:bold;cursor:pointer
+}
+button:hover{filter:brightness(1.25)}
+button.secondary{background:#465a80}
+#history{
+ max-height:180px;overflow:auto;text-align:left;
+ background:#11192c;padding:10px;border-radius:8px;
+ font-size:12px
+}
+#message{
+ position:fixed;top:90px;left:50%;
+ transform:translateX(-50%);
+ background:#141c32;border:1px solid #ff82c0;
+ border-radius:10px;padding:12px 18px;
+ z-index:10;display:none;text-align:center
+}
+#consent{
+ position:fixed;inset:0;background:#000b;
+ display:none;align-items:center;justify-content:center;
+ z-index:30;padding:15px
+}
+@media(max-width:600px){
+ #help{font-size:10px;max-width:155px}
+ .panel{font-size:11px;padding:7px}
+ #inventory{max-width:100%;bottom:105px}
+}
+</style>
+</head>
+
+<body>
+
+<canvas id="game"></canvas>
+
+<div id="hud">
+ <div class="panel">🏙️ CITY LOVE POTIONS</div>
+ <div class="panel">LEVEL: <b id="level">1</b></div>
+ <div class="panel">SCORE: <b id="score">0</b></div>
+ <div class="panel">FRIENDS: <b id="friends">0</b></div>
+ <div class="panel">GOAL: <b id="goal">250</b></div>
+ <div class="panel">TIME: <b id="timer">15:00</b></div>
+ <div class="panel">LIFE: <span id="healthOuter"><span id="health"></span></span></div>
+ <div class="panel">BEST: <b id="best">0</b></div>
+</div>
+
+<div id="inventory"></div>
+
+<div id="help">
+ <b>CONTROLS</b><br>
+ ⬆️⬇️⬅️➡️ Move<br>
+ SHIFT - Dash / Escape<br>
+ Mouse - Collect potions<br>
+ Click compatible NPC - Invite<br>
+ <b>RULES</b><br>
+ Avoid detectives and bombs.<br>
+ Respect relationship preferences.<br>
+ Consent is always required.
+</div>
+
+<div id="message"></div>
+
+<div id="consent">
+ <div class="dialog">
+  <h2 id="consentName">Relationship Invitation</h2>
+  <p id="consentText"></p>
+  <button id="accept">ACCEPT INVITATION</button>
+  <button id="decline" class="secondary">DECLINE</button>
+ </div>
+</div>
+
+<div id="menu">
+ <div class="dialog">
+  <h1>💗 CITY LOVE POTIONS</h1>
+  <h2>FOR COLORED PEOPLE</h2>
+  <p>A 2D City Adventure — 100 Levels</p>
+  <p>Collect five-senses potions, explore the city, avoid danger, and meet compatible people. Relationships always require mutual consent.</p>
+  <button onclick="startGame()">START GAME</button>
+  <button class="secondary" onclick="showHistory()">HIGH SCORES & HISTORY</button>
+  <div id="history" style="display:none"></div>
+  <p style="font-size:11px;color:#bac4dc">
+   Your game records are saved locally in this browser.
+  </p>
+ </div>
+</div>
+
+<script>
+"use strict";
+
+// =====================================
+// CITY LOVE POTIONS - MAIN GAME
+// =====================================
+
+const canvas=document.getElementById("game");
+const ctx=canvas.getContext("2d");
+
+let W=0,H=0;
+function resize(){
+ W=canvas.width=window.innerWidth;
+ H=canvas.height=window.innerHeight;
+}
+window.addEventListener("resize",resize);
+resize();
+
+const $=id=>document.getElementById(id);
+
+let running=false;
+let level=1;
+let score=0;
+let friends=0;
+let lives=100;
+let elapsed=0;
+let duration=900;
+let lastTime=0;
+let lastDamage=0;
+let dashUntil=0;
+let player={x:150,y:150,speed:230,r:15};
+
+let keys={};
+let potions=[];
+let people=[];
+let guards=[];
+let bombs=[];
+let cars=[];
+let particles=[];
+let selectedPerson=null;
+let gameMessageTimeout=null;
+
+const senses=[
+ {name:"Touch",emoji:"🤝",color:"#ff69b4"},
+ {name:"Smell",emoji:"🌹",color:"#c78aff"},
+ {name:"Taste",emoji:"🍓",color:"#ff6464"},
+ {name:"Sight",emoji:"👁️",color:"#63d9ff"},
+ {name:"Hearing",emoji:"🎵",color:"#ffd75e"}
+];
+
+let inventory={
+ Touch:0,Smell:0,Taste:0,Sight:0,Hearing:0
+};
+
+const colors=[
+ "#ff77a8","#ffb36c","#c18aff","#6de0d0",
+ "#e9d56c","#78aaff","#ff8a77","#d3a2ff"
+];
+
+function getGoal(l){
+ if(l<=25)return 250;
+ if(l<=50)return 500;
+ if(l<=58)return 600;
+ if(l<=75)return 750;
+ return 1000;
+}
+
+function getDuration(l){
+ if(l<=25)return 900;
+ if(l<=50)return 1800;
+ if(l<=58)return 2100;
+ if(l<=75)return 2700;
+ return 3600;
+}
+
+function random(min,max){
+ return Math.random()*(max-min)+min;
+}
+
+function distance(a,b){
+ return Math.hypot(a.x-b.x,a.y-b.y);
+}
+
+function notify(msg){
+ const el=$("message");
+ el.textContent=msg;
+ el.style.display="block";
+ clearTimeout(gameMessageTimeout);
+ gameMessageTimeout=setTimeout(()=>{
+  el.style.display="none";
+ },2300);
+}
+
+function loadRecords(){
+ try{
+  return JSON.parse(localStorage.getItem("cityLoveRecords")||"[]");
+ }catch(e){return []}
+}
+
+function saveRecord(type){
+ const records=loadRecords();
+ records.push({
+  type:type,
+  level:level,
+  score:score,
+  friends:friends,
+  date:new Date().toLocaleString()
+ });
+ records.sort((a,b)=>b.score-a.score);
+ localStorage.setItem("cityLoveRecords",JSON.stringify(records.slice(0,100)));
+ updateHUD();
+}
+
+function showHistory(){
+ const box=$("history");
+ box.style.display=box.style.display==="block"?"none":"block";
+ const records=loadRecords();
+ box.innerHTML="<b>GAME HISTORY</b><hr>"+
+ (records.length?records.map(r=>
+  `<p>${r.type} | Level ${r.level} | Score ${r.score} | Friends ${r.friends}<br>${r.date}</p>`
+ ).join(""):"No records yet.");
+}
+
+function updateHUD(){
+ $("level").textContent=level;
+ $("score").textContent=score;
+ $("friends").textContent=friends;
+ $("goal").textContent=getGoal(level);
+ $("best").textContent=Math.max(0,...loadRecords().map(r=>r.score));
+ $("health").style.width=Math.max(0,lives)+"%";
+ $("timer").textContent=formatTime(Math.max(0,duration-elapsed));
+ $("inventory").innerHTML=senses.map(s=>
+  `<div class="potion">${s.emoji} ${s.name}: ${inventory[s.name]}</div>`
+ ).join("");
+}
+
+function formatTime(seconds){
+ let m=Math.floor(seconds/60);
+ let s=Math.floor(seconds%60);
+ return String(m).padStart(2,"0")+":"+String(s).padStart(2,"0");
+}
+
+// =====================================
+// CITY GENERATION
+// =====================================
+
+function createCity(){
+ people=[];
+ potions=[];
+ guards=[];
+ bombs=[];
+ cars=[];
+
+ for(let i=0;i<22;i++){
+  spawnPerson();
+ }
+
+ for(let i=0;i<18;i++){
+  spawnPotion();
+ }
+
+ for(let i=0;i<Math.min(2+Math.floor(level/8),9);i++){
+  spawnGuard();
+ }
+
+ for(let i=0;i<3;i++){
+  cars.push({
+   x:random(0,W),y:random(80,H-60),
+   speed:random(35,90),color:colors[i]
+  });
+ }
+}
+
+function spawnPerson(){
+ let poly=Math.random()<.55;
+ let person={
+  x:random(50,W-50),
+  y:random(110,H-80),
+  r:13,
+  color:colors[Math.floor(random(0,colors.length))],
+  poly:poly,
+  single:true,
+  marriage:Math.random()<.18,
+  app:Math.random()<.30,
+  consent:Math.random()<.78,
+  moving:Math.random()<.6,
+  dx:random(-35,35),
+  dy:random(-35,35),
+  name:"City Resident "+Math.floor(random(100,999)),
+  cooldown:0
+ };
+ people.push(person);
+}
+
+function spawnPotion(){
+ const s=senses[Math.floor(random(0,senses.length))];
+ potions.push({
+  x:random(30,W-30),
+  y:random(100,H-40),
+  r:12,
+  sense:s.name,
+  emoji:s.emoji,
+  color:s.color
+ });
+}
+
+function spawnGuard(){
+ guards.push({
+  x:random(50,W-50),
+  y:random(100,H-80),
+  r:15,
+  speed:random(40,75)+level,
+  dx:random(-1,1),
+  dy:random(-1,1)
+ });
+}
+
+// =====================================
+// INPUT
+// =====================================
+
+window.addEventListener("keydown",e=>{
+ keys[e.key.toLowerCase()]=true;
+ if(["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"," "].includes(e.key)){
+  e.preventDefault();
+ }
+ if(e.key==="Shift" && running){
+  dashUntil=performance.now()+450;
+ }
+});
+
+window.addEventListener("keyup",e=>{
+ keys[e.key.toLowerCase()]=false;
+});
+
+canvas.addEventListener("click",e=>{
+ if(!running)return;
+
+ const rect=canvas.getBoundingClientRect();
+ const x=(e.clientX-rect.left)*canvas.width/rect.width;
+ const y=(e.clientY-rect.top)*canvas.height/rect.height;
+
+ // Collect potions.
+ for(let i=potions.length-1;i>=0;i--){
+  const p=potions[i];
+  if(Math.hypot(x-p.x,y-p.y)<28){
+   inventory[p.sense]++;
+   score+=10;
+   lives=Math.min(100,lives+2);
+   potions.splice(i,1);
+   spawnPotion();
+   notify(p.emoji+" "+p.sense+" potion collected! +10");
+   updateHUD();
+   return;
+  }
+ }
+
+ // Invite a compatible person.
+ for(const p of people){
+  if(Math.hypot(x-p.x,y-p.y)<30){
+   if(distance(player,p)>115){
+    notify("Move closer to this person first!");
+    return;
+   }
+   invitePerson(p);
+   return;
+  }
+ }
+});
+
+// =====================================
+// CONSENT SYSTEM
+// =====================================
+
+function invitePerson(p){
+ if(!p.poly){
+  notify("This person prefers monogamy. Respect their preference.");
+  return;
+ }
+
+ if(p.marriage){
+  notify("This person is looking for marriage. Respect their goal.");
+  return;
+ }
+
+ if(!p.single){
+  notify("This person is not single.");
+  return;
+ }
+
+ if(!p.app){
+  notify("Find a resident with a glowing dating-app phone for a bonus!");
+  return;
+ }
+
+ if(!senses.some(s=>inventory[s.name]>0)){
+  notify("Collect a five-senses potion first!");
+  return;
+ }
+
+ selectedPerson=p;
+ $("consentName").textContent=p.name;
+ $("consentText").textContent=
+  "This person is open to a polyamorous relationship. Would you both like to begin a friendship or relationship? The invitation does not guarantee acceptance.";
+ $("consent").style.display="flex";
+}
+
+$("accept").onclick=()=>{
+ if(!selectedPerson)return;
+ const p=selectedPerson;
+
+ // A potion is a symbolic invitation, not a means of control.
+ const available=senses.find(s=>inventory[s.name]>0);
+ if(available)inventory[available.name]--;
+
+ if(p.consent){
+  friends++;
+  score+=p.app?100:50;
+  p.single=false;
+  people=people.filter(person=>person!==p);
+  notify("💗 Mutual consent! Friendship gained. Bonus points!");
+  spawnPerson();
+ }else{
+  notify("The invitation was declined. Respect their decision.");
+ }
+
+ selectedPerson=null;
+ $("consent").style.display="none";
+ updateHUD();
+ checkLevel();
+};
+
+$("decline").onclick=()=>{
+ selectedPerson=null;
+ $("consent").style.display="none";
+ notify("Invitation cancelled.");
+};
+
+// =====================================
+// GAME MOVEMENT
+// =====================================
+
+function updatePlayer(dt){
+ let dx=0,dy=0;
+
+ if(keys.arrowup||keys.w)dy--;
+ if(keys.arrowdown||keys.s)dy++;
+ if(keys.arrowleft||keys.a)dx--;
+ if(keys.arrowright||keys.d)dx++;
+
+ const len=Math.hypot(dx,dy)||1;
+ let speed=player.speed;
+
+ if(performance.now()<dashUntil)speed*=2.7;
+
+ player.x+=dx/len*speed*dt;
+ player.y+=dy/len*speed*dt;
+
+ player.x=Math.max(15,Math.min(W-15,player.x));
+ player.y=Math.max(85,Math.min(H-15,player.y));
+}
+
+function updatePeople(dt){
+ people.forEach(p=>{
+  if(p.moving){
+   p.x+=p.dx*dt;
+   p.y+=p.dy*dt;
+
+   if(p.x<20||p.x>W-20)p.dx*=-1;
+   if(p.y<90||p.y>H-20)p.dy*=-1;
+  }
+
+  p.x=Math.max(15,Math.min(W-15,p.x));
+  p.y=Math.max(90,Math.min(H-15,p.y));
+ });
+}
+
+function updateGuards(dt){
+ guards.forEach(g=>{
+  let d=distance(player,g);
+
+  if(d<220){
+   let angle=Math.atan2(player.y-g.y,player.x-g.x);
+   g.x+=Math.cos(angle)*g.speed*dt;
+   g.y+=Math.sin(angle)*g.speed*dt;
+  }else{
+   g.x+=g.dx*g.speed*.5*dt;
+   g.y+=g.dy*g.speed*.5*dt;
+  }
+
+  if(g.x<10||g.x>W-10)g.dx*=-1;
+  if(g.y<85||g.y>H-10)g.dy*=-1;
+
+  if(d<28 && performance.now()-lastDamage>1100){
+   damage(8,"A detective caught you!");
+  }
+ });
+}
+
+function updateCars(dt){
+ cars.forEach(c=>{
+  c.x+=c.speed*dt;
+  if(c.x>W+50)c.x=-50;
+ });
+}
+
+function damage(amount,message){
+ lives=Math.max(0,lives-amount);
+ lastDamage=performance.now();
+ notify("⚠️ "+message+" - LIFE -"+amount);
+ updateHUD();
+
+ if(lives<=0)endGame(false);
+}
+
+// =====================================
+// BOMBS
+// =====================================
+
+function updateBombs(dt){
+ if(Math.random()<.0015+level*.000015 && bombs.length<3){
+  bombs.push({
+   x:random(40,W-40),
+   y:random(100,H-40),
+   life:4,
+   spark:2,
+   r:13
+  });
+ }
+
+ for(let i=bombs.length-1;i>=0;i--){
+  const b=bombs[i];
+  b.life-=dt;
+  b.spark-=dt;
+
+  if(distance(player,b)<30){
+   damage(20,"Dangerous bomb! Escape quickly!");
+   bombs.splice(i,1);
+   continue;
+  }
+
+  if(b.life<=0)bombs.splice(i,1);
+ }
+}
+
+// =====================================
+// DRAW CITY
+// =====================================
+
+function drawBuilding(x,y,w,h,color,label){
+ ctx.fillStyle=color;
+ ctx.fillRect(x,y,w,h);
+
+ ctx.fillStyle="#18263b";
+ ctx.fillRect(x+10,y+20,w-20,h-20);
+
+ for(let xx=x+18;xx<x+w-15;xx+=35){
+  for(let yy=y+35;yy<y+h-15;yy+=40){
+   ctx.fillStyle="#70c8e8";
+   ctx.fillRect(xx,yy,17,20);
+  }
+ }
+
+ ctx.fillStyle="#fff";
+ ctx.font="bold 12px Arial";
+ ctx.fillText(label,x+8,y+14);
+}
+
+function drawWorld(){
+ ctx.fillStyle="#4b895c";
+ ctx.fillRect(0,0,W,H);
+
+ // Roads
+ ctx.fillStyle="#333c49";
+ ctx.fillRect(0,H*.38,W,65);
+ ctx.fillRect(W*.48,75,65,H);
+
+ // Road markings
+ ctx.strokeStyle="#f7d96c";
+ ctx.lineWidth=3;
+ ctx.setLineDash([20,18]);
+ ctx.beginPath();
+ ctx.moveTo(0,H*.38+32);
+ ctx.lineTo(W,H*.38+32);
+ ctx.stroke();
+ ctx.beginPath();
+ ctx.moveTo(W*.48+32,75);
+ ctx.lineTo(W*.48+32,H);
+ ctx.stroke();
+ ctx.setLineDash([]);
+
+ // City buildings
+ drawBuilding(25,105,105,125,"#aa6c88","HOUSE");
+ drawBuilding(160,105,110,125,"#7c83bc","HOTEL");
+ drawBuilding(W-260,105,110,125,"#ae8054","MOTEL");
+ drawBuilding(W-125,105,100,125,"#5c9c9c","BUILDING");
+
+ // Houses lower area
+ drawBuilding(30,H-180,120,120,"#ad7b54","HOUSE");
+ drawBuilding(W-155,H-180,120,120,"#8b6ca9","HOTEL");
+
+ // Trees
+ for(let i=0;i<15;i++){
+  let x=(i*137+50)%W;
+  let y=250+(i*91)%(Math.max(100,H-270));
+  ctx.fillStyle="#205b38";
+  ctx.beginPath();ctx.arc(x,y,13,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle="#6d9f51";
+  ctx.beginPath();ctx.arc(x-4,y-4,10,0,Math.PI*2);ctx.fill();
+ }
+
+ // Cars
+ cars.forEach(c=>{
+  ctx.fillStyle=c.color;
+  ctx.fillRect(c.x,c.y,42,19);
+  ctx.fillStyle="#bceaff";
+  ctx.fillRect(c.x+8,c.y+3,13,8);
+ });
+}
+
+function drawPerson(p){
+ ctx.fillStyle=p.color;
+ ctx.beginPath();
+ ctx.arc(p.x,p.y,p.r,0,Math.PI*2);
+ ctx.fill();
+
+ ctx.fillStyle="#20202b";
+ ctx.beginPath();
+ ctx.arc(p.x,p.y-4,5,0,Math.PI*2);
+ ctx.fill();
+
+ if(p.poly){
+  ctx.fillStyle="#ff74c4";
+  ctx.fillRect(p.x-7,p.y+17,14,4);
+ }else{
+  ctx.fillStyle="#85a9ff";
+  ctx.fillRect(p.x-7,p.y+17,14,4);
+ }
+
+ if(p.app){
+  ctx.fillStyle="#fff16a";
+  ctx.shadowColor="#fff16a";
+  ctx.shadowBlur=13;
+  ctx.fillRect(p.x+12,p.y-12,7,12);
+  ctx.shadowBlur=0;
+ }
+
+ if(p.marriage){
+  ctx.fillStyle="#fff";
+  ctx.font="12px Arial";
+  ctx.fillText("💍",p.x-8,p.y-19);
+ }
+}
+
+function drawPotion(p){
+ ctx.save();
+ ctx.shadowColor=p.color;
+ ctx.shadowBlur=17;
+ ctx.fillStyle=p.color;
+ ctx.beginPath();
+ ctx.arc(p.x,p.y,p.r,0,Math.PI*2);
+ ctx.fill();
+ ctx.shadowBlur=0;
+ ctx.font="17px Arial";
+ ctx.fillText(p.emoji,p.x-9,p.y+6);
+ ctx.restore();
+}
+
+function drawGuard(g){
+ ctx.fillStyle="#262d3b";
+ ctx.beginPath();
+ ctx.arc(g.x,g.y,g.r,0,Math.PI*2);
+ ctx.fill();
+ ctx.fillStyle="#ff4040";
+ ctx.fillRect(g.x-8,g.y-5,16,5);
+ ctx.font="17px Arial";
+ ctx.fillText("🚨",g.x-9,g.y-20);
+}
+
+function drawBomb(b){
+ ctx.save();
+ ctx.fillStyle="#242424";
+ ctx.beginPath();
+ ctx.arc(b.x,b.y,b.r,0,Math.PI*2);
+ ctx.fill();
+ if(b.spark>0){
+  ctx.shadowColor="#ffcf32";
+  ctx.shadowBlur=25;
+  ctx.fillStyle="#ffea45";
+  ctx.font="20px Arial";
+  ctx.fillText("⚡",b.x-10,b.y-15);
+ }
+ ctx.restore();
+}
+
+function drawPlayer(){
+ ctx.fillStyle="#f5e0c4";
+ ctx.beginPath();
+ ctx.arc(player.x,player.y,player.r,0,Math.PI*2);
+ ctx.fill();
+
+ ctx.fillStyle="#3047a2";
+ ctx.fillRect(player.x-9,player.y+9,18,16);
+
+ ctx.fillStyle="#fff";
+ ctx.font="bold 11px Arial";
+ ctx.textAlign="center";
+ ctx.fillText("YOU",player.x,player.y-23);
+ ctx.textAlign="left";
+}
+
+function draw(){
+ ctx.clearRect(0,0,W,H);
+ drawWorld();
+
+ potions.forEach(drawPotion);
+ people.forEach(drawPerson);
+ guards.forEach(drawGuard);
+ bombs.forEach(drawBomb);
+ drawPlayer();
+
+ ctx.fillStyle="#fff";
+ ctx.font="12px Arial";
+ ctx.fillText("CITY EXPLORATION AREA",15,H-12);
+}
+
+// =====================================
+// LEVEL SYSTEM
+// =====================================
+
+function checkLevel(){
+ if(friends>=getGoal(level)){
+  levelComplete();
+ }
+}
+
+function levelComplete(){
+ if(!running)return;
+
+ saveRecord("LEVEL COMPLETED");
+
+ if(level>=100){
+  endGame(true);
+  return;
+ }
+
+ level++;
+ elapsed=0;
+ duration=getDuration(level);
+ lives=Math.min(100,lives+20);
+ friends=0;
+ inventory={
+  Touch:0,Smell:0,Taste:0,Sight:0,Hearing:0
+ };
+
+ createCity();
+ updateHUD();
+ notify("🎉 LEVEL "+(level-1)+" COMPLETED! Welcome to Level "+level);
+}
+
+function endGame(won){
+ if(!running)return;
+ running=false;
+ saveRecord(won?"100 LEVELS COMPLETED":"GAME OVER");
+
+ $("menu").style.display="flex";
+ $("menu").innerHTML=`
+ <div class="dialog">
+  <h1>${won?"🏆 CONGRATULATIONS!":"💔 GAME OVER"}</h1>
+  <h2>${won?"YOU COMPLETED ALL 100 LEVELS!":"YOUR ADVENTURE HAS ENDED"}</h2>
+  <p>Final Level: ${level}</p>
+  <p>Final Score: ${score}</p>
+  <p>Mutual Friendships: ${friends}</p>
+  <button onclick="startGame()">PLAY AGAIN</button>
+  <button class="secondary" onclick="showHistory()">VIEW HISTORY</button>
+  <div id="history" style="display:none"></div>
+ </div>`;
+}
+
+// =====================================
+// MAIN LOOP
+// =====================================
+
+function loop(now){
+ if(!running)return;
+
+ let dt=Math.min((now-lastTime)/1000,.05);
+ lastTime=now;
+
+ elapsed+=dt;
+
+ if(elapsed>=duration){
+  endGame(false);
+  return;
+ }
+
+ updatePlayer(dt);
+ updatePeople(dt);
+ updateGuards(dt);
+ updateCars(dt);
+ updateBombs(dt);
+
+ if(Math.random()<.006 && people.length<30)spawnPerson();
+ if(Math.random()<.008 && potions.length<25)spawnPotion();
+
+ draw();
+ updateHUD();
+
+ requestAnimationFrame(loop);
+}
+
+// =====================================
+// START GAME
+// =====================================
+
+function startGame(){
+ level=1;
+ score=0;
+ friends=0;
+ lives=100;
+ elapsed=0;
+ duration=getDuration(level);
+ lastDamage=0;
+
+ player.x=W/2;
+ player.y=H/2;
+
+ inventory={
+  Touch:0,Smell:0,Taste:0,Sight:0,Hearing:0
+ };
+
+ createCity();
+
+ $("menu").style.display="none";
+ $("consent").style.display="none";
+
+ running=true;
+ lastTime=performance.now();
+ updateHUD();
+ notify("Welcome! Explore the city and collect potions.");
+ requestAnimationFrame(loop);
+}
+
+updateHUD();
+draw();
+</script>
+</body>
+</html>
